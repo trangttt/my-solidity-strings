@@ -132,6 +132,10 @@ library Strings {
     */
     function len(string _self) internal returns(int l){
         slice memory s = toSlice(_self);
+        return len(s);
+    }
+
+    function len(slice s) internal returns(int l){
         uint ptr = s._ptr - 31; // to collect only the first byte when using mload
         uint end = ptr + s._len;
 
@@ -154,5 +158,101 @@ library Strings {
                 ptr += 6;
             }
         }
+    }
+    
+    function startsWith(string _self, string _prefix) internal pure returns(bool){
+        uint slength = bytes(_self).length;
+        uint plength = bytes(_prefix).length;
+
+        if (slength < plength)
+            return false;
+        
+        // same pointer
+        bool equal;
+        uint sptr;
+        uint pptr;
+        assembly {
+            sptr := add(_self, 0x20)
+            pptr := add(_prefix, 0x20)
+        }
+        if (sptr == pptr)
+            return true;
+        
+        assembly {
+            let length := mload(_prefix) // length of prefix
+            let sh := keccak256(add(_self, 0x20), length)
+            let ph := keccak256(add(_prefix, 0x20), length)
+            equal := eq(sh, ph)
+        }
+        return equal;
+    }
+
+    function endsWith(string _self, string _suffix) internal pure returns(bool){
+        uint slen = bytes(_self).length;
+        uint flen = bytes(_suffix).length;
+        
+        if (flen > slen)
+            return false;
+
+        uint sptr;
+        uint pptr;
+        assembly {
+            sptr := sub(add(add(_self, 0x20), slen), flen)
+            pptr := add(_suffix, 0x20)
+        }
+        if (sptr == pptr)
+            return true;
+
+        bool equal;
+        assembly {
+           let sh := keccak256(sptr, flen) 
+           let fh := keccak256(pptr, flen)
+           equal := eq(sh, fh)
+        }
+        return equal;
+    }
+    /*
+    * return index of substring if presence. Otherwise, returns -1
+    */
+    function subString(string _self, string _sub) internal returns (int){
+        slice memory s = toSlice(_self);
+        slice memory b = toSlice(_sub);
+
+        uint ptr = findShortPtr(s._len, s._ptr, b._len, b._ptr);
+        if (ptr < s._len + s._ptr){
+            uint length = ptr - s._ptr;
+            slice memory ns = slice(s._ptr, length);
+            return len(ns);
+        }
+        return  int(-1);
+    }
+
+    /*
+    * check whether a substring at subPtr, with subLen in self.
+    * return _selfPtr + _selfLen if not exists
+    */
+    function findShortPtr(uint _selfLen, uint _selfPtr, uint _subLen, uint _subPtr ) internal returns (uint){
+        if (_subLen < _selfLen) {
+            uint ptr;
+            uint end;
+            assembly {
+                let mask := not(sub(exp(2, mul(8, sub(32, _subLen))), 1))
+                let subData := and(mload(_subPtr), mask)
+                end := add(add(_selfPtr, sub(_selfLen, _subLen)), 1) // not <= for later check, so increase end by 1 to use < only
+                ptr := _selfPtr
+                let sData := and(mload(ptr), mask)
+                loop:
+                    jumpi(exit, eq(sData, subData))
+                    ptr := add(ptr, 1)
+                    sData := and(mload(ptr), mask)
+                    jumpi(loop, lt(ptr, end)) // add with extra 1 above
+                exit:
+            }
+            if (ptr < end) 
+                return ptr;
+            else
+                return _selfPtr + _selfLen;
+        }
+        return _selfPtr + _selfLen;
     }
 }

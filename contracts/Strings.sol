@@ -126,4 +126,33 @@ library Strings {
         }
         return int(s1._len) - int(s2._len);
     }
+
+    /*
+    * return length in runes of the slice. Meaning, take into account UTF-8 encoding
+    */
+    function len(string _self) internal returns(int l){
+        slice memory s = toSlice(_self);
+        uint ptr = s._ptr - 31; // to collect only the first byte when using mload
+        uint end = ptr + s._len;
+
+        for(l=0; ptr < end; l++){
+            uint8 v;
+            assembly{
+                v := and(mload(ptr), 0xFF)
+            }
+            if ( v < 0x80 ){
+                ptr += 1;
+            } else if (v < 0xE0){
+                ptr += 2;
+            } else if (v < 0xF0){
+                ptr += 3;
+            } else if (v < 0xF8){
+                ptr += 4;
+            } else if (v < 0xFC){
+                ptr += 5;
+            } else{
+                ptr += 6;
+            }
+        }
+    }
 }

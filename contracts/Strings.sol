@@ -130,12 +130,12 @@ library Strings {
     /*
     * return length in runes of the slice. Meaning, take into account UTF-8 encoding
     */
-    function len(string _self) internal returns(int l){
+    function len(string _self) internal pure returns(int l){
         slice memory s = toSlice(_self);
         return len(s);
     }
 
-    function len(slice s) internal returns(int l){
+    function len(slice s) internal pure returns(int l){
         uint ptr = s._ptr - 31; // to collect only the first byte when using mload
         uint end = ptr + s._len;
 
@@ -214,11 +214,11 @@ library Strings {
     /*
     * return index of substring if presence. Otherwise, returns -1
     */
-    function subString(string _self, string _sub) internal returns (int){
+    function subString(string _self, string _sub) internal pure returns (int){
         slice memory s = toSlice(_self);
         slice memory b = toSlice(_sub);
 
-        uint ptr = findShortPtr(s._len, s._ptr, b._len, b._ptr);
+        uint ptr = findPtr(s._len, s._ptr, b._len, b._ptr);
         if (ptr < s._len + s._ptr){
             uint length = ptr - s._ptr;
             slice memory ns = slice(s._ptr, length);
@@ -230,8 +230,9 @@ library Strings {
     /*
     * check whether a substring at subPtr, with subLen in self.
     * return _selfPtr + _selfLen if not exists
+    * _subLen < 32, shortString must be within one word
     */
-    function findShortPtr(uint _selfLen, uint _selfPtr, uint _subLen, uint _subPtr ) internal returns (uint){
+    function findShortPtr(uint _selfLen, uint _selfPtr, uint _subLen, uint _subPtr ) internal pure returns (uint){
         if (_subLen < _selfLen) {
             uint ptr;
             uint end;
@@ -239,20 +240,55 @@ library Strings {
                 let mask := not(sub(exp(2, mul(8, sub(32, _subLen))), 1))
                 let subData := and(mload(_subPtr), mask)
                 end := add(add(_selfPtr, sub(_selfLen, _subLen)), 1) // not <= for later check, so increase end by 1 to use < only
+                // one-line code
+                //for {ptr:= _selfPtr} and(lt(ptr, end), not(eq(and(mload(ptr), mask), subData))) {ptr:= add(ptr, 1)}
+                //{}
                 ptr := _selfPtr
                 let sData := and(mload(ptr), mask)
-                loop:
-                    jumpi(exit, eq(sData, subData))
+                for {} and(lt(ptr, end), not(eq(sData, subData))) {} {
                     ptr := add(ptr, 1)
                     sData := and(mload(ptr), mask)
-                    jumpi(loop, lt(ptr, end)) // add with extra 1 above
-                exit:
+                }
             }
-            if (ptr < end) 
+            if (ptr < end)
                 return ptr;
             else
                 return _selfPtr + _selfLen;
         }
         return _selfPtr + _selfLen;
+    }
+    /*
+    * for subString > 32 word
+    */
+    function findPtr(uint _selfLen, uint _selfPtr, uint _subLen, uint _subPtr) internal pure returns (uint){
+        if (_subLen <= 32)
+            return findShortPtr(_selfLen, _selfPtr, _subLen, _subPtr);
+        uint ptr = _selfPtr;
+        uint end = _selfPtr + _selfLen - _subLen;
+        uint subHash;
+        assembly {
+            subHash := keccak256(_subPtr, _subLen)
+        }
+        while (ptr <= end ){
+            // find first occurence of 32-byte subString
+            uint newPtr = findShortPtr(_selfLen, ptr, 32, _subPtr);
+
+            // No string match
+            if (newPtr > end)
+                return _selfPtr + _selfLen;
+
+            // ensure the whole string match
+            uint hash;
+            bool equal;
+            assembly {
+                hash := keccak256(newPtr, _subLen)
+                equal := eq(hash, subHash)
+            }
+            if (equal)
+                return newPtr;
+
+            // Look for next occurent of 32-byte substring
+            ptr = newPtr;
+        }
     }
 }
